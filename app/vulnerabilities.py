@@ -1,43 +1,35 @@
-import os
-import ast
+from flask import Flask, request, render_template_string
+import sqlite3
 
-# --- VULNERABLE EXAMPLES ---
+app = Flask(__name__)
 
-# 1. Arbitrary Code Execution via eval()
-# eval() is designed for expressions. An attacker can use __import__ to 
-# reach the 'os' module and run system commands.
-print("--- Running eval() exploit ---")
-vulnerable_input_eval = "__import__('os').getlogin()" 
-# In a real attack, this might be: "__import__('os').system('rm -rf /')"
-result = eval(vulnerable_input_eval)
-print(f"User identified via eval: {result}\n")
+# Mock database setup
+def get_db_connection():
+    conn = sqlite3.connect(':memory:', check_same_thread=False)
+    conn.execute('CREATE TABLE users (id INTEGER, username TEXT, secret TEXT)')
+    conn.execute("INSERT INTO users VALUES (1, 'admin', 'SuperSecret123')")
+    return conn
 
+db = get_db_connection()
 
-# 2. Arbitrary Code Execution via exec()
-# exec() allows multi-line Python code. This example creates a dummy 
-# file on the system, simulating a data breach or system modification.
-print("--- Running exec() exploit ---")
-vulnerable_input_exec = """
-import os
-with open('pwned.txt', 'w') as f:
-    f.write('This system has a vulnerability.')
-print('Malicious file "pwned.txt" created successfully.')
-"""
-exec(vulnerable_input_exec)
+@app.route('/')
+def home():
+    # 1. XSS VULNERABILITY
+    # Directly reflecting user input in HTML without escaping
+    name = request.args.get('name', 'Guest')
+    html_content = f"<h1>Welcome, {name}!</h1>"
+    return render_template_string(html_content)
 
-
-# --- SECURE ALTERNATIVE ---
-
-# 3. Using ast.literal_eval() for safety
-# This will only evaluate literal structures (strings, numbers, tuples, lists, dicts)
-# It will raise a ValueError if you try to pass code or system commands.
-print("\n--- Running Secure Alternative ---")
-safe_input = "{'status': 'success', 'data': [1, 2, 3]}"
-try:
-    data = ast.literal_eval(safe_input)
-    print(f"Safely parsed data: {data}")
+@app.route('/user')
+def get_user():
+    # 2. SQL INJECTION VULNERABILITY
+    # Using f-strings to build a query instead of parameterized inputs
+    user_id = request.args.get('id')
+    query = f"SELECT username FROM users WHERE id = {user_id}"
     
-    # This would fail safely:
-    # ast.literal_eval("__import__('os').system('ls')") 
-except (ValueError, SyntaxError) as e:
-    print(f"Blocked malicious input: {e}")
+    cursor = db.execute(query)
+    user = cursor.fetchone()
+    return f"User found: {user[0]}" if user else "User not found"
+
+if __name__ == '__main__':
+    app.run(debug=True)
